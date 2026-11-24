@@ -647,7 +647,7 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
     plan_name_clean = re.sub(r'<[^>]+>', '', plan_name)
     user_display = get_user_display(user_obj, plan_name_clean)
 
-    lines = ["━" * 32, f"           𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", "━" * 32, "", f"Result Type → {type_label} {type_emoji}", f"Total Cards → {total_count}", f"Gateway → Shopify Mass", f"Powered By → 𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", "━" * 32, ""]
+    lines = ["━" * 32, f"           𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", "━" * 32, "", f"Result Type → {type_label} {type_emoji}", f"Total Cards → {total_count}", f"Gateway → Shopify Mass", f"Powered By → 𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", "━" * 32, ""]
 
     if total_count == 0:
         lines.append("No cards found for this category")
@@ -672,7 +672,7 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
             else:
                 status = "DECLINED ❌"
 
-            lines.extend([f"Status → {status}", f"Card → {cc}", f"Gateway → Shopify {price} {card_data.get('currency', 'USD')}", f"Response → {response}", f"Brand → {scheme}", f"Issuer → {bank}", f"Country → {country_display}", f"User → {user_display}", f"Dev → воин", "━" * 32, ""])
+            lines.extend([f"Status → {status}", f"Card → {cc}", f"Gateway → Shopify {price} {card_data.get('currency', 'USD')}", f"Response → {response}", f"Brand → {scheme}", f"Issuer → {bank}", f"Country → {country_display}", f"User → {user_display}", f"Dev → 𝗡𝗔𝗥𝗨𝗧𝗢", "━" * 32, ""])
 
     content = "\n".join(lines)
     file_buffer = BytesIO(content.encode('utf-8'))
@@ -680,7 +680,7 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     type_map = {"charged": "CHARGED", "live": "LIVE", "dead": "DEAD", "all": "ALL"}
-    filename = f"XCONCHK{type_map.get(result_type, 'ALL')}_{timestamp}.txt"
+    filename = f"INFERNOX{type_map.get(result_type, 'ALL')}_{timestamp}.txt"
 
     return file_buffer, filename, total_count
 
@@ -722,7 +722,7 @@ async def send_hit_log_to_group(bot: Bot, response_msg, user_obj, plan_name, pro
                f'<tg-emoji emoji-id="{REPLY_EMOJI_ID}">❣️</tg-emoji> <b>{safe_response}</b>\n'
                f"𝗨𝘀𝗲𝗿 ➛ {user_link} {random_star()}\n")
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", url="https://t.me/InfernoXchk_bot")]])
 
     try:
         await hit_log_limiter.wait()
@@ -739,7 +739,7 @@ async def send_approved_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_da
     gateway_display = html_escape(f"Shopify {api_price} {currency}")
     safe_response = safe_html(response_msg)
     user_link = build_user_link(user_obj)
-    dev_link = '<a href="tg://openmessage?user_id=8937448847">воин</a>'
+    dev_link = '<a href="tg://openmessage?user_id=8801932812">𝗡𝗔𝗥𝗨𝗧𝗢</a>'
     user_display = f"{user_link} <b>({plan_name})</b>"
 
     caption = gate_result_caption(
@@ -756,7 +756,7 @@ async def send_approved_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_da
         proxy=proxy_status_formatted,
     )
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", url="https://t.me/InfernoXchk_bot")]])
 
     try:
         sent = await send_random_video(bot, user_obj.id, caption=caption)
@@ -776,7 +776,7 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
     gateway_display = html_escape(f"Shopify {api_price} {currency}")
     safe_response = safe_html(response_msg)
     user_link = build_user_link(user_obj)
-    dev_link = '<a href="tg://openmessage?user_id=8937448847">воин</a>'
+    dev_link = '<a href="tg://openmessage?user_id=8801932812">𝗡𝗔𝗥𝗨𝗧𝗢</a>'
     user_display = f"{user_link} <b>({plan_name})</b>"
 
     caption = gate_result_caption(
@@ -793,7 +793,7 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
         proxy=proxy_status_formatted,
     )
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", url="https://t.me/InfernoXchk_bot")]])
 
     try:
         msg_id = await send_random_video(bot, user_obj.id, caption=caption)
