@@ -27,8 +27,8 @@ router = Router()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MAX_CONCURRENT_CHECKS = 20  # Parallel requests limit
-PROXY_TIMEOUT = 8  # Timeout per proxy check (seconds)
+MAX_CONCURRENT_CHECKS = 20   # Parallel live-check requests
+PROXY_TIMEOUT = 15           # Seconds per IP-check URL (was 8 — killed live slow proxies)
 IP_CHECK_URLS = [
     "https://api.ipify.org?format=json",
     "https://ifconfig.me/ip",
@@ -36,11 +36,11 @@ IP_CHECK_URLS = [
 ]
 
 # Speed test configuration — only save proxies that respond within this time
-SPEED_TEST_TIMEOUT = 20  # seconds — reject if slower
+SPEED_TEST_TIMEOUT = 25      # seconds — reject if slower (was 20)
 SPEED_TEST_SITE = "neeja-baby-shop.myshopify.com"
 SPEED_TEST_CARD = "4242424242424242|12|27|123"
-SPEED_TEST_API_TIMEOUT = 25  # aiohttp timeout for speed test request
-SPEED_TEST_CONCURRENT = 20  # parallel speed tests
+SPEED_TEST_API_TIMEOUT = 30  # aiohttp timeout for speed test request (was 25)
+SPEED_TEST_CONCURRENT = 20   # parallel speed tests
 API_ENDPOINTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_endpoints.txt")
 
 # Special characters that break proxy auth (cause 407 errors)
@@ -55,8 +55,8 @@ def parse_proxy_input(proxy_input):
     Parses proxy input from ANY common format.
     """
     s = proxy_input.strip()
-    protocol = 'http' 
-    
+    protocol = 'http'
+
     protocol_match = re.match(r'^(?P<p>http|https|socks4|socks5)://', s, re.IGNORECASE)
     if protocol_match:
         protocol = protocol_match.group('p').lower()
@@ -130,29 +130,33 @@ def build_dict(user, password, ip, port, protocol, original_input):
 async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
     """
     Checks if proxy is live using multiple IP check APIs with fallback.
+
     Returns: (is_alive: bool, info: dict)
-    
-    Args:
-        proxy_url: Full proxy URL with auth
-        session: Optional aiohttp session (for connection pooling)
-        timeout: Request timeout per URL (seconds)
+
+    Key behaviour:
+    - Tries EACH URL in turn.
+    - On timeout / connection error / bad status — CONTINUE to the next URL.
+    - Only returns False if ALL URLs fail.
+    - connect timeout == per-URL timeout (not halved) so slow CONNECTs get full room.
+    - total timeout is timeout + 4s (a small grace above the connect phase).
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/plain'
     }
-    
-    client_timeout = aiohttp.ClientTimeout(total=timeout, connect=timeout/2)
-    
+
+    client_timeout = aiohttp.ClientTimeout(total=timeout + 4, connect=timeout)
+
     close_session = False
     if session is None:
         session = aiohttp.ClientSession(timeout=client_timeout, headers=headers)
         close_session = True
-    
-    last_error = "Unknown error"
-    
+
+    failures = []
+
     try:
         for ip_url in IP_CHECK_URLS:
+            short = ip_url.split("//")[-1].split("/")[0]
             try:
                 async with session.get(ip_url, proxy=proxy_url, ssl=False) as resp:
                     if resp.status == 200:
@@ -162,39 +166,48 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
                                 data = await resp.json()
                                 ip = data.get('ip') or data.get('query')
                                 if ip:
-                                    return True, {"ip": ip}
+                                    return True, {"ip": ip, "via": short}
                             except Exception:
                                 text_data = await resp.text()
                                 if text_data.strip():
-                                    return True, {"ip": text_data.strip()}
+                                    return True, {"ip": text_data.strip(), "via": short}
                         else:
                             text_data = await resp.text()
                             if text_data.strip():
-                                return True, {"ip": text_data.strip()}
-                        last_error = "No IP in response"
+                                return True, {"ip": text_data.strip(), "via": short}
+                        failures.append(f"{short}:no-ip")
+                        continue
+                    elif resp.status in (403, 407):
+                        failures.append(f"{short}:http{resp.status}")
                         continue
                     elif resp.status in (417, 429):
-                        last_error = f"HTTP {resp.status}"
+                        failures.append(f"{short}:http{resp.status}")
                         continue
                     else:
-                        last_error = f"HTTP {resp.status}"
+                        failures.append(f"{short}:http{resp.status}")
                         continue
+
             except asyncio.TimeoutError:
-                last_error = "Timeout"
+                failures.append(f"{short}:timeout")
                 continue
-            except aiohttp.ClientProxyConnectionError:
-                return False, {"error": "Connection failed"}
-            except aiohttp.ClientConnectorError:
-                return False, {"error": "DNS/Connection error"}
+            except (aiohttp.ClientProxyConnectionError, aiohttp.ClientConnectorError) as e:
+                failures.append(f"{short}:conn({type(e).__name__})")
+                continue
+            except (aiohttp.ServerDisconnectedError, aiohttp.ServerTimeoutError,
+                    aiohttp.ConnectionTimeoutError) as e:
+                failures.append(f"{short}:{type(e).__name__}")
+                continue
             except aiohttp.ClientError as e:
-                last_error = f"Client error: {str(e)[:50]}"
+                failures.append(f"{short}:client({str(e)[:30]})")
                 continue
             except Exception as e:
-                last_error = str(e)[:80]
+                failures.append(f"{short}:{type(e).__name__}")
                 continue
-        
-        return False, {"error": last_error}
-        
+
+        # All URLs failed
+        summary = " | ".join(failures[:3]) if failures else "all-failed"
+        return False, {"error": summary}
+
     finally:
         if close_session:
             await session.close()
@@ -203,35 +216,24 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
 async def check_proxies_parallel(proxies_list, max_concurrent=MAX_CONCURRENT_CHECKS):
     """
     Check multiple proxies in parallel with semaphore limiting.
-    
-    Args:
-        proxies_list: List of proxy dicts with 'url_format' key
-        max_concurrent: Max simultaneous checks (default: 5)
-        
-    Returns:
-        List of tuples: [(proxy_data, is_live, info), ...]
     """
     semaphore = asyncio.Semaphore(max_concurrent)
-    
+
     async def check_with_semaphore(proxy_data):
         async with semaphore:
             is_live, info = await check_proxy_live(proxy_data['url_format'])
             return (proxy_data, is_live, info)
-    
-    # Create tasks for all proxies
+
     tasks = [check_with_semaphore(p) for p in proxies_list]
-    
-    # Execute all tasks concurrently and gather results
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Process results - handle any exceptions
+
     processed_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             processed_results.append((proxies_list[i], False, {"error": str(result)}))
         else:
             processed_results.append(result)
-    
+
     return processed_results
 
 
@@ -242,7 +244,7 @@ async def run_db_operation(func, *args):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# SPEED TEST — Only save fast proxies (≤20s response time)
+# SPEED TEST — Only save fast proxies
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def get_speed_test_api():
@@ -291,7 +293,7 @@ async def check_proxy_speed(proxy_data, api_url=None):
                     data = json.loads(text)
                     status = data.get("Status", False)
                     response = str(data.get("Response", ""))
-                except:
+                except Exception:
                     response = text[:80]
 
                 if "429" in response:
@@ -318,7 +320,6 @@ async def check_proxy_speed(proxy_data, api_url=None):
 async def check_proxies_speed_parallel(live_proxies, api_url=None, max_concurrent=SPEED_TEST_CONCURRENT):
     """
     Speed test multiple proxies in parallel.
-    Returns: List of tuples: [(proxy_data, is_fast, response_time, response), ...]
     """
     if not api_url:
         api_url = get_speed_test_api()
@@ -352,7 +353,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
     """Process proxies in background — Live check → Speed test → Save only fast ones"""
     user_id = message.from_user.id
     total_count = len(valid_proxies)
-    
+
     speed_api = get_speed_test_api()
 
     status_msg = await message.reply(
@@ -363,7 +364,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
         parse_mode="HTML"
     )
 
-    # Step 1: Live check (existing)
+    # Step 1: Live check
     results_list = await check_proxies_parallel(valid_proxies)
     live_count = sum(1 for _, is_live, _ in results_list if is_live)
     dead_count = total_count - live_count
@@ -373,7 +374,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
         if is_live:
             live_proxies.append(proxy_data)
 
-    # Step 2: Speed test (NEW — only save proxies faster than 20s)
+    # Step 2: Speed test
     fast_count = 0
     slow_count = 0
     fast_proxies = []
@@ -511,12 +512,12 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
 async def check_db_proxies_background(bot, message: types.Message):
     """Check saved proxies in background - PARALLEL, single reply to command"""
     user_id = message.from_user.id
-    
+
     # Fetch proxies from DB
     def fetch_proxies():
         docs = database.get_user_proxies(user_id)
         return [{"id": d["_id"], "proxy": d["proxy"]} for d in docs]
-    
+
     try:
         rows = await run_db_operation(fetch_proxies)
     except Exception as e:
@@ -529,19 +530,17 @@ async def check_db_proxies_background(bot, message: types.Message):
         return
 
     total_count = len(rows)
-    
-    # Send initial status message
+
     status_msg = await message.reply(
         f"⏳ <b>Checking saved proxies...</b>\n\n"
         f"<code>{total_count}</code> proxies to check\n"
         f"<i>Testing {min(MAX_CONCURRENT_CHECKS, total_count)} at a time...</i>",
         parse_mode="HTML"
     )
-    
-    # Prepare proxy list for parallel checking
+
     proxies_to_check = []
     proxy_id_map = {}
-    
+
     for idx, row in enumerate(rows):
         proxy_id = row['id']
         proxy_str = row['proxy']
@@ -549,18 +548,17 @@ async def check_db_proxies_background(bot, message: types.Message):
         if parsed:
             proxies_to_check.append(parsed)
             proxy_id_map[idx] = proxy_id
-    
+
     if not proxies_to_check:
         await message.reply("<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> No valid proxies found in database.</b>", parse_mode="HTML")
         return
-    
+
     # PARALLEL CHECKING
     results_list = await check_proxies_parallel(proxies_to_check)
-    
+
     dead_ids = []
     live_proxies = []
-    
-    # Process results
+
     for idx, (proxy_data, is_live, info) in enumerate(results_list):
         db_id = proxy_id_map.get(idx)
         if is_live:
@@ -568,19 +566,17 @@ async def check_db_proxies_background(bot, message: types.Message):
         else:
             if db_id:
                 dead_ids.append(db_id)
-    
-    # Delete dead proxies from DB
+
     if dead_ids:
         def delete_dead():
             return database.delete_proxies_by_ids(dead_ids)
-        
+
         try:
             deleted_count = await run_db_operation(delete_dead)
             logging.info(f"Deleted {deleted_count} dead proxies for user {user_id}")
         except Exception as e:
             logging.error(f"DB Delete Error: {e}")
 
-    # Build caption
     caption = (
         f"<b><tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji> Check Complete!</b>\n\n"
         f"<b>Total ➛</b> <code>{total_count}</code>\n"
@@ -590,7 +586,7 @@ async def check_db_proxies_background(bot, message: types.Message):
 
     if not live_proxies:
         caption += "\n\n<b><tg-emoji emoji-id=\"5213205860498549992\">⚠️</tg-emoji> No live proxies remaining.</b>"
-        
+
         try:
             await bot.edit_message_text(
                 chat_id=status_msg.chat.id,
@@ -602,7 +598,6 @@ async def check_db_proxies_background(bot, message: types.Message):
             await message.reply(caption, parse_mode="HTML")
         return
 
-    # Build .txt file content with http format
     file_content = ""
     for p_str in live_proxies:
         parsed = parse_proxy_input(p_str)
@@ -611,22 +606,19 @@ async def check_db_proxies_background(bot, message: types.Message):
         else:
             file_content += p_str + "\n"
 
-    # Create file
     txt_file = BufferedInputFile(
         file=file_content.encode('utf-8'),
         filename=f"live_proxies_{len(live_proxies)}.txt"
     )
 
-    # Delete status message and send file
     try:
         await bot.delete_message(
-            chat_id=status_msg.chat.id, 
+            chat_id=status_msg.chat.id,
             message_id=status_msg.message_id
         )
     except Exception:
         pass
 
-    # Send document
     try:
         await message.reply_document(
             document=txt_file,
@@ -645,23 +637,19 @@ async def check_db_proxies_background(bot, message: types.Message):
 @router.message(F.text.startswith("/proxy"))
 async def proxy_command(message: types.Message):
     raw_text = ""
-    
-    # Check command arguments from text or caption
+
     cmd_text = message.text or message.caption or ""
     parts = cmd_text.split(maxsplit=1)
-    
-    # Only use argument as proxy content if no document is present (arg is likely a filename otherwise)
+
     if len(parts) > 1 and not message.document and not (message.reply_to_message and message.reply_to_message.document):
         raw_text += parts[1].strip() + "\n"
-    
-    # Check reply to message (text, caption, or document)
+
     if message.reply_to_message:
         reply = message.reply_to_message
         if reply.text:
             raw_text += reply.text + "\n"
         if reply.caption:
             raw_text += reply.caption + "\n"
-        # Read document from replied message
         if reply.document and not message.document:
             if reply.document.file_size > 2 * 1024 * 1024:
                 await message.reply("<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> File too large. Max 2MB.</b>", parse_mode="HTML")
@@ -673,8 +661,7 @@ async def proxy_command(message: types.Message):
             except Exception as e:
                 await message.reply(f"<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> Error reading file: {e}</b>", parse_mode="HTML")
                 return
-    
-    # Check for document in current message
+
     if message.document:
         if message.document.file_size > 2 * 1024 * 1024:
             await message.reply("<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> File too large. Max 2MB.</b>", parse_mode="HTML")
@@ -699,11 +686,10 @@ async def proxy_command(message: types.Message):
         )
         return
 
-    # Parse proxies
     lines = raw_text.strip().split('\n')
     valid_proxies = []
     invalid_lines = []
-    
+
     for line in lines:
         line = line.strip()
         if not line:
@@ -713,7 +699,7 @@ async def proxy_command(message: types.Message):
             valid_proxies.append(proxy_data)
         else:
             invalid_lines.append(line[:50])
-    
+
     if not valid_proxies:
         error_msg = "<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> No valid proxies found.</b>\n\n"
         if invalid_lines:
@@ -723,7 +709,6 @@ async def proxy_command(message: types.Message):
         await message.reply(error_msg, parse_mode="HTML")
         return
 
-    # Start background task
     asyncio.create_task(process_proxies_background(message.bot, message, valid_proxies))
 
 
@@ -743,14 +728,14 @@ async def checkproxy_command(message: types.Message):
 @router.message(F.text.startswith("/clearproxy"))
 async def clearproxy_command(message: types.Message):
     user_id = message.from_user.id
-    
+
     def clear_proxies():
         count = database.count_proxies(user_id)
         if count > 0:
             database.delete_all_proxies(user_id)
             return count
         return 0
-    
+
     try:
         count = await run_db_operation(clear_proxies)
         if count > 0:
@@ -779,10 +764,10 @@ async def clearproxy_command(message: types.Message):
 async def myproxies_command(message: types.Message):
     """Quick check how many proxies are saved"""
     user_id = message.from_user.id
-    
+
     def count_proxies():
         return database.count_proxies(user_id)
-    
+
     try:
         count = await run_db_operation(count_proxies)
         if count > 0:
