@@ -85,7 +85,7 @@ WEBHOOK_URL = f"https://cxchk.site/{BOT_TOKEN}"
 WEBHOST = "0.0.0.0"
 WEBPORT = 8080
 
-START_IMAGE_URL = "https://ibb.co/HDq4RbWB"
+START_IMAGE_URL = "https://i.ibb.co/WpcBF1XK/IMG-20261124-163312-630.png"
 LOG_CHANNEL_ID = -1003946142627
 BOT_LINK = "https://t.me/Xconcc_bot"
 
