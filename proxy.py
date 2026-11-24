@@ -35,14 +35,6 @@ IP_CHECK_URLS = [
     "http://ip-api.com/json/",
 ]
 
-# Speed test configuration — only save proxies that respond within this time
-SPEED_TEST_TIMEOUT = 45      # seconds — reject if slower (was 25, free proxies need room)
-SPEED_TEST_SITE = "neeja-baby-shop.myshopify.com"
-SPEED_TEST_CARD = "4242424242424242|12|27|123"
-SPEED_TEST_API_TIMEOUT = 60  # aiohttp timeout for speed test request (must be > SPEED_TEST_TIMEOUT)
-SPEED_TEST_CONCURRENT = 20   # parallel speed tests
-API_ENDPOINTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_endpoints.txt")
-
 # Special characters that break proxy auth (cause 407 errors)
 BAD_PROXY_CHARS = set('!@#$%^&*()+=,;:<>?[]{}|\\\"\'`~')
 
@@ -137,8 +129,6 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
     - Tries EACH URL in turn.
     - On timeout / connection error / bad status — CONTINUE to the next URL.
     - Only returns False if ALL URLs fail.
-    - connect timeout == per-URL timeout so slow CONNECTs get full room.
-    - total timeout = timeout + 4 (grace above connect).
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -243,174 +233,33 @@ async def run_db_operation(func, *args):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# SPEED TEST — Only save fast proxies
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def get_speed_test_api():
-    """Load first API endpoint from api_endpoints.txt for speed testing"""
-    try:
-        if os.path.exists(API_ENDPOINTS_FILE):
-            with open(API_ENDPOINTS_FILE, "r", encoding="utf-8") as f:
-                endpoints = [line.strip() for line in f if line.strip()]
-                if endpoints:
-                    return endpoints[0]
-    except Exception as e:
-        logging.error(f"Error loading speed test API: {e}")
-    return None
-
-
-async def check_proxy_speed(proxy_data, api_url=None):
-    """
-    Test proxy speed against Shopify API.
-    Returns: (is_fast: bool, response_time: float, response: str)
-    """
-    if not api_url:
-        api_url = get_speed_test_api()
-    if not api_url:
-        return True, 0, "No API — skipped speed test"
-
-    user = proxy_data['user']
-    pw = proxy_data['password']
-    ip = proxy_data['ip']
-    port = proxy_data['port']
-
-    proxy_str = f"{ip}:{port}:{user}:{pw}"
-    encoded_proxy = urllib.parse.quote(proxy_str)
-    encoded_card = urllib.parse.quote(SPEED_TEST_CARD)
-    encoded_site = urllib.parse.quote(SPEED_TEST_SITE)
-
-    url = f"{api_url}?site={encoded_site}&cc={encoded_card}&proxy={encoded_proxy}"
-
-    start = time.time()
-    try:
-        timeout = aiohttp.ClientTimeout(total=SPEED_TEST_API_TIMEOUT)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, ssl=False) as resp:
-                elapsed = round(time.time() - start, 2)
-                text = await resp.text()
-                try:
-                    data = json.loads(text)
-                    status = data.get("Status", False)
-                    response = str(data.get("Response", ""))
-                except Exception:
-                    response = text[:80]
-
-                if "429" in response:
-                    if elapsed <= SPEED_TEST_TIMEOUT:
-                        return True, elapsed, "429 (fast)"
-                    return False, elapsed, "429 (slow)"
-                elif "CARD_DECLINED" in response or "GENERIC_ERROR" in response or status:
-                    if elapsed <= SPEED_TEST_TIMEOUT:
-                        return True, elapsed, response[:30]
-                    return False, elapsed, f"SLOW {response[:20]}"
-                else:
-                    if elapsed <= SPEED_TEST_TIMEOUT:
-                        return True, elapsed, response[:30]
-                    return False, elapsed, f"SLOW {response[:20]}"
-
-    except asyncio.TimeoutError:
-        elapsed = round(time.time() - start, 2)
-        return False, elapsed, "Timeout"
-    except Exception as e:
-        elapsed = round(time.time() - start, 2)
-        return False, elapsed, str(e)[:30]
-
-
-async def check_proxies_speed_parallel(live_proxies, api_url=None, max_concurrent=SPEED_TEST_CONCURRENT):
-    """
-    Speed test multiple proxies in parallel.
-    """
-    if not api_url:
-        api_url = get_speed_test_api()
-    if not api_url:
-        return [(p, True, 0, "No API — skipped") for p in live_proxies]
-
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def test_one(proxy_data):
-        async with semaphore:
-            is_fast, elapsed, response = await check_proxy_speed(proxy_data, api_url)
-            return (proxy_data, is_fast, elapsed, response)
-
-    tasks = [test_one(p) for p in live_proxies]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    processed = []
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            processed.append((live_proxies[i], False, 0, str(result)[:30]))
-        else:
-            processed.append(result)
-    return processed
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BACKGROUND TASKS (PARALLEL PROCESSING)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def process_proxies_background(bot, message: types.Message, valid_proxies: list):
-    """Process proxies in background — Live check → Speed test → Save only fast ones"""
+    """Process proxies in background — Live check → Save live ones"""
     user_id = message.from_user.id
     total_count = len(valid_proxies)
-
-    speed_api = get_speed_test_api()
 
     status_msg = await message.reply(
         f"⏳ <b>Processing...</b>\n\n"
         f"<code>{total_count}</code> proxies to check\n"
-        f"<i>Live check: {min(MAX_CONCURRENT_CHECKS, total_count)} at a time</i>\n"
-        f"<i>Speed test: internal</i>",
+        f"<i>Live check: {min(MAX_CONCURRENT_CHECKS, total_count)} at a time</i>",
         parse_mode="HTML"
     )
 
-    # Step 1: Live check
+    # Live check
     results_list = await check_proxies_parallel(valid_proxies)
     live_count = sum(1 for _, is_live, _ in results_list if is_live)
     dead_count = total_count - live_count
 
-    live_proxies = []
-    for proxy_data, is_live, info in results_list:
-        if is_live:
-            live_proxies.append(proxy_data)
+    live_proxies = [proxy_data for proxy_data, is_live, _ in results_list if is_live]
 
-    # Step 2: Speed test
-    fast_count = 0
-    slow_count = 0
-    fast_proxies = []
-
-    if live_proxies:
-        if speed_api:
-            try:
-                await bot.edit_message_text(
-                    chat_id=status_msg.chat.id,
-                    message_id=status_msg.message_id,
-                    text=(
-                        f"⏳ <b>Speed Testing...</b>\n\n"
-                        f"<b>Live:</b> {live_count} | <b>Dead:</b> {dead_count}\n"
-                        f"<i>Testing {len(live_proxies)} live proxies for speed (≤{SPEED_TEST_TIMEOUT}s)...</i>"
-                    ),
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
-
-            speed_results = await check_proxies_speed_parallel(live_proxies, speed_api)
-            for proxy_data, is_fast, elapsed, response in speed_results:
-                if is_fast:
-                    fast_proxies.append(proxy_data)
-                    fast_count += 1
-                else:
-                    slow_count += 1
-                    logging.info(f"[SPEED] Rejected slow proxy {proxy_data['ip']}:{proxy_data['port']} — {elapsed}s — {response}")
-        else:
-            fast_proxies = live_proxies
-            fast_count = len(live_proxies)
-
-    # Step 3: Save to database (only fast proxies)
+    # Save to database (all live proxies)
     added_count = 0
     clone_count = 0
 
-    if fast_proxies:
+    if live_proxies:
         try:
             def save_to_db():
                 nonlocal added_count, clone_count
@@ -418,18 +267,18 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
                 existing_proxies = {d["proxy"] for d in docs}
                 added = 0
                 clones = 0
-                for proxy_data_item in fast_proxies:
+                for proxy_data_item in live_proxies:
                     proxy_str = proxy_data_item['db_format']
                     if proxy_str not in existing_proxies:
                         database.add_proxy(user_id, proxy_str)
                         existing_proxies.add(proxy_str)
                         added += 1
-                        logging.info(f"Added fast proxy for user {user_id}: {proxy_str}")
+                        logging.info(f"Added live proxy for user {user_id}: {proxy_str}")
                     else:
                         clones += 1
                 return added, clones
             added_count, clone_count = await run_db_operation(save_to_db)
-            logging.info(f"Saved {added_count} fast proxies, {clone_count} duplicates for user {user_id}")
+            logging.info(f"Saved {added_count} live proxies, {clone_count} duplicates for user {user_id}")
         except Exception as e:
             logging.error(f"DB Error while saving proxies: {e}")
             added_count = 0
@@ -443,10 +292,8 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
             f"<b><tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji> Complete!</b>\n\n"
             f"<b>Total ➛</b> <code>{total_count}</code>\n"
             f"<b>Live ➛</b> <b>{live_count}</b> <tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji>\n"
-            f"<b>Fast ➛</b> <b>{fast_count}</b> ⚡\n"
             f"<b>Added ➛</b> <b>{added_count}</b> 💾\n"
             f"<b>Clones ➛</b> <b>{clone_count}</b> 🔁\n"
-            f"<b>Slow ➛</b> <b>{slow_count}</b> 🐌\n"
             f"<b>Dead ➛</b> <b>{dead_count}</b> <tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji>"
         )
     else:
@@ -463,19 +310,11 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
                 f"<b>Reason ➛</b> <code>{error_msg}</code>\n\n"
                 f"<b><tg-emoji emoji-id=\"5456288730140675445\">🚫</tg-emoji> Not added.</b>"
             )
-        elif fast_count == 0 and slow_count > 0:
-            caption = (
-                f"<b><tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> Too Slow!</b>\n\n"
-                f"<b>Status ➛ Live but SLOW 🐌</b>\n"
-                f"<b>IP ➛</b> <code>{proxy_data.get('ip', 'Unknown')}</code>\n"
-                f"<b>Threshold ➛</b> ≤{SPEED_TEST_TIMEOUT}s required\n\n"
-                f"<b><tg-emoji emoji-id=\"5456288730140675445\">🚫</tg-emoji> Not added.</b>"
-            )
         elif added_count > 0:
             ip = info.get("ip") or proxy_data.get('ip', 'Unknown')
             caption = (
                 f"<b><tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji> Success!</b>\n\n"
-                f"<b>Status ➛ Fast ⚡</b>\n"
+                f"<b>Status ➛ Live</b>\n"
                 f"<b>IP ➛</b> <code>{ip}</code>\n\n"
                 f"<b>💾 Saved to database</b>"
             )
@@ -483,7 +322,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
             ip = info.get("ip") or proxy_data.get('ip', 'Unknown')
             caption = (
                 f"<b><tg-emoji emoji-id=\"5213205860498549992\">⚠️</tg-emoji> Warning!</b>\n\n"
-                f"<b>Status ➛ Fast ⚡</b>\n"
+                f"<b>Status ➛ Live</b>\n"
                 f"<b>IP ➛</b> <code>{ip}</code>\n\n"
                 f"<b>🔁 Already exists in database</b>"
             )
@@ -491,7 +330,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
             ip = info.get("ip") or proxy_data.get('ip', 'Unknown')
             caption = (
                 f"<b><tg-emoji emoji-id=\"5213205860498549992\">⚠️</tg-emoji> Warning!</b>\n\n"
-                f"<b>Status ➛ Fast ⚡</b>\n"
+                f"<b>Status ➛ Live</b>\n"
                 f"<b>IP ➛</b> <code>{ip}</code>\n\n"
                 f"<b>❓ Unknown error - not saved</b>"
             )
