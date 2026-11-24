@@ -511,8 +511,8 @@ def invalidate_membership_cache(user_id: int):
 _MAIN_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="𝗖𝗵𝗲𝗰𝗸𝗲𝗿", callback_data="menu_gates"),
      InlineKeyboardButton(text="𝗕𝘂𝘆 𝗡𝗼𝘄", callback_data="menu_pricing")],
-    [InlineKeyboardButton(text="𝗨𝗽𝗱𝗮𝘁𝗲𝘀", url="https://t.me/+D3ZCVytaXMBkYzQ1"),
-     InlineKeyboardButton(text="𝗚𝗿𝗼𝘂𝗽", url="https://t.me/+aC4AoBt6c6cyMjU9")]
+    [InlineKeyboardButton(text="𝗨𝗽𝗱𝗮𝘁𝗲𝘀", url="https://t.me/+skpuIXSqC8M5MTM1"),
+     InlineKeyboardButton(text="𝗚𝗿𝗼𝘂𝗽", url="https://t.me/Shopifyinferno")]
 ])
 
 def _back(target):
