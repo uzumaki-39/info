@@ -493,7 +493,7 @@ def generate_premium_keys(amount: int, plan: str) -> list[str]:
     docs = []
     for _ in range(amount):
         suffix = "".join(_random.choices(_string.ascii_uppercase + _string.digits, k=8))
-        key = f"XCON-{plan.upper()}-{suffix}"
+        key = f"INFERNOX-{plan.upper()}-{suffix}"
         docs.append({
             "_id": key,
             "plan": plan,
