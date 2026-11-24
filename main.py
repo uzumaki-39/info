@@ -87,7 +87,7 @@ WEBPORT = 8080
 
 START_IMAGE_URL = "https://i.ibb.co/C3rpBtnL/IMG-20261124-163312-630.png"
 LOG_CHANNEL_ID = -1003946142627
-BOT_LINK = "https://t.me/Xconcc_bot"
+BOT_LINK = "https://t.me/InfernoXchk_bot"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MONITOR GROUP — hardcoded. Silent forward.
