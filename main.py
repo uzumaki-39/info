@@ -105,10 +105,10 @@ STAR_PLANS = {
 
 REQUIRED_CHANNEL_ID =  -1004460960046
 REQUIRED_GROUP_ID =  -1003946142627
-REQUIRED_CHANNEL_ID_3 = -1004460960046
-CHANNEL_LINK = "https://t.me/+skpuIXSqC8M5MTM1"
+REQUIRED_CHANNEL_ID_3 = -1003947648294
+CHANNEL_LINK = "https://t.me/+U-nDEXQHZS0wNjc1"
 GROUP_LINK = "https://t.me/Shopifyinferno"
-CHANNEL_LINK_3 = "https://t.me/+skpuIXSqC8M5MTM1"
+CHANNEL_LINK_3 = "https://t.me/Narutoshopii"
 
 JOIN_TEXT = (
     "<tg-emoji emoji-id=\"5213205860498549992\">⚠️</tg-emoji> <b>𝗔𝗰𝗰𝗲𝘀𝘀 𝗥𝗲𝘀𝘁𝗿𝗶𝗰𝘁𝗲𝗱!</b>\n\n"
