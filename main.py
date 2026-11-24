@@ -470,7 +470,7 @@ def _status_sync(user_id):
 async def _get_caption(user) -> str:
     credits_str, access_str, joined_str = await asyncio.to_thread(_status_sync, user.id)
     ul = f'<a href="tg://user?id={user.id}">{html_escape(user.first_name or "")}</a>'
-    dl = '<a href="tg://openmessage?user_id=8937448847">воин</a>'
+    dl = '<a href="tg://openmessage?user_id=8801932812">𝗡𝗔𝗥𝗨𝗧𝗢</a>'
     return (
         f"𝗨𝘀𝗲𝗿 ➛ {ul}\n"
         f"𝗨𝘀𝗲𝗿 𝗜𝗗 ➛ <code>{user.id}</code>\n"
@@ -483,7 +483,7 @@ async def _get_caption(user) -> str:
 
 def _loading_caption(user) -> str:
     ul = f'<a href="tg://user?id={user.id}">{html_escape(user.first_name or "")}</a>'
-    dl = '<a href="tg://openmessage?user_id=8937448847">воин</a>'
+    dl = '<a href="tg://openmessage?user_id=8801932812">𝗡𝗔𝗥𝗨𝗧𝗢</a>'
     return (
         f"𝗨𝘀𝗲𝗿 ➛ {ul}\n"
         f"𝗨𝘀𝗲𝗿 𝗜𝗗 ➛ <code>{user.id}</code>\n"
