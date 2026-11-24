@@ -28,7 +28,7 @@ router = Router()
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MAX_CONCURRENT_CHECKS = 20   # Parallel live-check requests
-PROXY_TIMEOUT = 15           # Seconds per IP-check URL (was 8 — killed live slow proxies)
+PROXY_TIMEOUT = 15           # Seconds per IP-check URL (connect + read)
 IP_CHECK_URLS = [
     "https://api.ipify.org?format=json",
     "https://ifconfig.me/ip",
@@ -36,10 +36,10 @@ IP_CHECK_URLS = [
 ]
 
 # Speed test configuration — only save proxies that respond within this time
-SPEED_TEST_TIMEOUT = 25      # seconds — reject if slower (was 20)
+SPEED_TEST_TIMEOUT = 45      # seconds — reject if slower (was 25, free proxies need room)
 SPEED_TEST_SITE = "neeja-baby-shop.myshopify.com"
 SPEED_TEST_CARD = "4242424242424242|12|27|123"
-SPEED_TEST_API_TIMEOUT = 30  # aiohttp timeout for speed test request (was 25)
+SPEED_TEST_API_TIMEOUT = 60  # aiohttp timeout for speed test request (must be > SPEED_TEST_TIMEOUT)
 SPEED_TEST_CONCURRENT = 20   # parallel speed tests
 API_ENDPOINTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_endpoints.txt")
 
@@ -133,12 +133,12 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
 
     Returns: (is_alive: bool, info: dict)
 
-    Key behaviour:
+    Behaviour:
     - Tries EACH URL in turn.
     - On timeout / connection error / bad status — CONTINUE to the next URL.
     - Only returns False if ALL URLs fail.
-    - connect timeout == per-URL timeout (not halved) so slow CONNECTs get full room.
-    - total timeout is timeout + 4s (a small grace above the connect phase).
+    - connect timeout == per-URL timeout so slow CONNECTs get full room.
+    - total timeout = timeout + 4 (grace above connect).
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -204,7 +204,6 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
                 failures.append(f"{short}:{type(e).__name__}")
                 continue
 
-        # All URLs failed
         summary = " | ".join(failures[:3]) if failures else "all-failed"
         return False, {"error": summary}
 
