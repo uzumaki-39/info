@@ -317,7 +317,7 @@ def gate_result_caption(cmd, status, card, gateway, response, brand, issuer,
         lines.append(f"<tg-emoji emoji-id=\"6298678524379137990\">🌚</tg-emoji>𝗗𝗲𝘃 ➛ {dev_link}")
     return "\n".join(lines)
 
-_DEV_LINK = "<a href='tg://openmessage?user_id=8937448847'>воин</a>"
+_DEV_LINK = "<a href='tg://openmessage?user_id=8801932812'>𝗡𝗔𝗥𝗨𝗧𝗢</a>"
 
 def mass_status_frame(title, status, checked, total, approved, charged,
                       dead, errors, time_str, session_id, apis=None):
