@@ -9,7 +9,7 @@ import database
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ADMIN_IDS = [8242039526, 8801932812]
+ADMIN_IDS = [8242039526, 6857145175, 8801932812]
 
 # Edit the live counter at most once every N seconds (no flood)
 UPDATE_INTERVAL = 10

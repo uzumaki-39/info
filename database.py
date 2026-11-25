@@ -8,7 +8,7 @@ from pymongo.errors import DuplicateKeyError, BulkWriteError
 MONGO_URI = "mongodb+srv://xcon:xcon%40148@shein.dit627e.mongodb.net/?retryWrites=true&w=majority&appName=shein"
 MONGO_DB = "ccc"
 
-ADMIN_IDS = {8801932812, 8242039526}
+ADMIN_IDS = {8801932812, 6857145175, 8242039526}
 
 _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
 _db = _client[MONGO_DB]

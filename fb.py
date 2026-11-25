@@ -14,7 +14,7 @@ from aiogram.types import (
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ADMIN_IDS        = [8242039526, 8801932812]
+ADMIN_IDS        = [8242039526, 6857145175, 8801932812]
 FEEDBACK_CHANNEL = -1003946142627   # channel where approved hits are posted
 
 router = Router()

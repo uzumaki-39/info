@@ -4,7 +4,7 @@ from aiogram import Router, types, BaseMiddleware
 from aiogram.filters import Command
 from database import is_gate_enabled, set_gate_status
 
-ADMIN_IDS = [8242039526, 8801932812]
+ADMIN_IDS = [8242039526, 6857145175, 8801932812]
 
 router = Router()
 

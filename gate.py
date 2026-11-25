@@ -2,7 +2,7 @@ from aiogram import types, Router
 from database import set_gate_status
 
 # <tg-emoji emoji-id=\"5868424587749891806\">🔴</tg-emoji> Replace with your Telegram user ID(s)
-ADMINS = [8242039526, 8801932812]
+ADMINS = [8242039526, 6857145175, 8801932812]
 
 router = Router()
 
