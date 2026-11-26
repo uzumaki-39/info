@@ -106,9 +106,9 @@ STAR_PLANS = {
 REQUIRED_CHANNEL_ID =  -1004460960046
 REQUIRED_GROUP_ID =  -1003946142627
 REQUIRED_CHANNEL_ID_3 = -1004460960046
-CHANNEL_LINK = "https://t.me/+skpuIXSqC8M5MTM1"
+CHANNEL_LINK = "https://t.me/+U-nDEXQHZS0wNjc1"
 GROUP_LINK = "https://t.me/Shopifyinferno"
-CHANNEL_LINK_3 = "https://t.me/+skpuIXSqC8M5MTM1"
+CHANNEL_LINK_3 = "https://t.me/narutoshopii"
 
 JOIN_TEXT = (
     "<tg-emoji emoji-id=\"5213205860498549992\">⚠️</tg-emoji> <b>𝗔𝗰𝗰𝗲𝘀𝘀 𝗥𝗲𝘀𝘁𝗿𝗶𝗰𝘁𝗲𝗱!</b>\n\n"
@@ -511,7 +511,7 @@ def invalidate_membership_cache(user_id: int):
 _MAIN_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="𝗖𝗵𝗲𝗰𝗸𝗲𝗿", callback_data="menu_gates"),
      InlineKeyboardButton(text="𝗕𝘂𝘆 𝗡𝗼𝘄", callback_data="menu_pricing")],
-    [InlineKeyboardButton(text="𝗨𝗽𝗱𝗮𝘁𝗲𝘀", url="https://t.me/+skpuIXSqC8M5MTM1"),
+    [InlineKeyboardButton(text="𝗨𝗽𝗱𝗮𝘁𝗲𝘀", url="https://t.me/+U-nDEXQHZS0wNjc1"),
      InlineKeyboardButton(text="𝗚𝗿𝗼𝘂𝗽", url="https://t.me/Shopifyinferno")]
 ])
 
