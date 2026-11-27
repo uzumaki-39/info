@@ -131,7 +131,7 @@ async def binn_command(message: types.Message):
 
     dev_link = '<a href="tg://openmessage?user_id=8801932812">𝗡𝗔𝗥𝗨𝗧𝗢</a>'
     button = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", url="https://t.me/Xconcc_bot", style="primary", icon_custom_emoji_id="5827986023254072662")]
+        [InlineKeyboardButton(text="𝑰𝑵𝑭𝑬𝑹𝑵𝑶 𝑿 𝑪𝑯𝑲", url="https://t.me/InfernoXchk_bot", style="primary", icon_custom_emoji_id="5827986023254072662")]
     ])
 
     # 7. Format response
